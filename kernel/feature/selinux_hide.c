@@ -104,7 +104,7 @@ static write_op_fn orig_context_write, orig_access_write;
 static ssize_t my_write_context(struct file *file, char *buf, size_t size)
 {
     // apply to all app uids
-    if (likely(current_uid().val < 10000)) {
+    if (likely(is_init(current_cred()) || is_ksu_domain())) {
         return orig_context_write(file, buf, size);
     }
     char *canon = NULL;
@@ -142,7 +142,7 @@ out:
 static ssize_t my_write_access(struct file *file, char *buf, size_t size)
 {
     // apply to all app uids
-    if (likely(current_uid().val < 10000)) {
+    if (likely(is_init(current_cred()) || is_ksu_domain())) {
         return orig_access_write(file, buf, size);
     }
     char *scon = NULL, *tcon = NULL;
@@ -240,7 +240,7 @@ static u32 ptrace_parent_sid(void)
 typedef int (*setprocattr_fn)(const char *name, void *value, size_t size);
 static int __nocfi my_setprocattr(const char *name, void *value, size_t size)
 {
-    if (likely(current_uid().val < 10000)) {
+    if (likely(is_init(current_cred()) || is_ksu_domain())) {
         goto call_orig;
     }
 
@@ -345,7 +345,7 @@ static int __nocfi my_inode_setxattr(struct dentry *dentry, const char *name, co
     u32 sid = current_sid(), newsid, backup_sid;
     int rc, backup_rc;
 
-    if (likely(current_uid().val < 10000) || strcmp(name, XATTR_NAME_SELINUX))
+    if (likely(is_init(current_cred()) || is_ksu_domain()) || strcmp(name, XATTR_NAME_SELINUX))
         goto call_orig;
 
     // Keep native force parsing for callers with CAP_MAC_ADMIN
@@ -1040,7 +1040,7 @@ static int security_context_to_sid_live(const char *scontext, u32 scontext_len, 
 
     /* An empty security context is never valid. */
     if (!scontext_len)
-		        return -EINVAL;
+        return -EINVAL;
 
     /* Copy the string to allow changes and ensure a NUL terminator */
     scontext2 = kmemdup_nul(scontext, scontext_len, GFP_KERNEL);
