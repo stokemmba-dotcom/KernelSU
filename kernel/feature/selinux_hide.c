@@ -103,8 +103,8 @@ static write_op_fn orig_context_write, orig_access_write;
 
 static ssize_t my_write_context(struct file *file, char *buf, size_t size)
 {
-    // apply to all uids
-    if (false) {
+    // apply to all app uids
+    if (likely(current_uid().val < 10000)) {
         return orig_context_write(file, buf, size);
     }
     char *canon = NULL;
@@ -141,8 +141,8 @@ out:
 
 static ssize_t my_write_access(struct file *file, char *buf, size_t size)
 {
-    // apply to all uids
-    if (false) {
+    // apply to all app uids
+    if (likely(current_uid().val < 10000)) {
         return orig_access_write(file, buf, size);
     }
     char *scon = NULL, *tcon = NULL;
@@ -240,6 +240,10 @@ static u32 ptrace_parent_sid(void)
 typedef int (*setprocattr_fn)(const char *name, void *value, size_t size);
 static int __nocfi my_setprocattr(const char *name, void *value, size_t size)
 {
+    if (likely(current_uid().val < 10000)) {
+        goto call_orig;
+    }
+
     if (strcmp(name, "current")) {
         goto call_orig;
     }
@@ -341,7 +345,7 @@ static int __nocfi my_inode_setxattr(struct dentry *dentry, const char *name, co
     u32 sid = current_sid(), newsid, backup_sid;
     int rc, backup_rc;
 
-    if (strcmp(name, XATTR_NAME_SELINUX))
+    if (likely(current_uid().val < 10000) || strcmp(name, XATTR_NAME_SELINUX))
         goto call_orig;
 
     // Keep native force parsing for callers with CAP_MAC_ADMIN
@@ -492,7 +496,7 @@ typedef int (*sel_open_handle_status_fn)(struct inode *inode, struct file *filp)
 static sel_open_handle_status_fn orig_sel_open_handle_status, *sel_open_handle_status_slot;
 static int my_sel_open_handle_status(struct inode *inode, struct file *filp)
 {
-    if (likely(ksu_selinux_hide_enabled)) {
+    if (likely(current_uid().val >= 10000 && ksu_selinux_hide_enabled)) {
         void *data = fake_status;
         if (data) {
             filp->private_data = data;
@@ -516,7 +520,7 @@ static int ksu_selinux_hide_enable()
     if (!backup_sepolicy) {
         pr_err("no backup sepolicy available, please save feature and reboot to retry!\n");
         return -EAGAIN;
-}
+    }
     ret = selinux_hide_init_setxattr();
     if (ret) {
         pr_err("selinux_hide: init: setxattr helpers err: %d\n", ret);
