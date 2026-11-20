@@ -243,4 +243,4 @@ fn main() {
     if target_os == "android" {
         configure_bindgen();
     }
-        }
+}
