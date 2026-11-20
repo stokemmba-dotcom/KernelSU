@@ -78,3 +78,4 @@ jobs:
       with:
         name: ksud-${{ inputs.target }}
         path: target/${{ inputs.target }}/release/ksud
+        
