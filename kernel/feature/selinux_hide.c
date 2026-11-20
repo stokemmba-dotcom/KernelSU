@@ -36,6 +36,15 @@
 #include "policy/feature.h"
 #include "hook/lsm_hook.h"
 
+#define AID_SHELL 2000
+// shell (adb) is uid 2000, below the app range (10000+); scanners that
+// run checks via `adb shell` use this uid, so it must be treated like
+// an app uid for the hide to be consistent.
+static inline bool ksu_is_hide_target_uid(kuid_t uid)
+{
+    return uid.val >= 10000 || uid.val == AID_SHELL;
+}
+
 static DEFINE_MUTEX(selinux_hide_mutex);
 static bool ksu_selinux_hide_enabled __read_mostly = false;
 static bool ksu_selinux_hide_running __read_mostly = false;
@@ -104,7 +113,7 @@ static write_op_fn orig_context_write, orig_access_write;
 static ssize_t my_write_context(struct file *file, char *buf, size_t size)
 {
     // apply to all app uids
-    if (likely(is_init(current_cred()) || is_ksu_domain())) {
+    if (likely(!ksu_is_hide_target_uid(current_uid()))) {
         return orig_context_write(file, buf, size);
     }
     char *canon = NULL;
@@ -142,7 +151,7 @@ out:
 static ssize_t my_write_access(struct file *file, char *buf, size_t size)
 {
     // apply to all app uids
-    if (likely(is_init(current_cred()) || is_ksu_domain())) {
+    if (likely(!ksu_is_hide_target_uid(current_uid()))) {
         return orig_access_write(file, buf, size);
     }
     char *scon = NULL, *tcon = NULL;
@@ -240,7 +249,7 @@ static u32 ptrace_parent_sid(void)
 typedef int (*setprocattr_fn)(const char *name, void *value, size_t size);
 static int __nocfi my_setprocattr(const char *name, void *value, size_t size)
 {
-    if (likely(is_init(current_cred()) || is_ksu_domain())) {
+    if (likely(!ksu_is_hide_target_uid(current_uid()))) {
         goto call_orig;
     }
 
@@ -345,7 +354,7 @@ static int __nocfi my_inode_setxattr(struct dentry *dentry, const char *name, co
     u32 sid = current_sid(), newsid, backup_sid;
     int rc, backup_rc;
 
-    if (likely(is_init(current_cred()) || is_ksu_domain()) || strcmp(name, XATTR_NAME_SELINUX))
+    if (likely(!ksu_is_hide_target_uid(current_uid())) || strcmp(name, XATTR_NAME_SELINUX))
         goto call_orig;
 
     // Keep native force parsing for callers with CAP_MAC_ADMIN
@@ -496,7 +505,7 @@ typedef int (*sel_open_handle_status_fn)(struct inode *inode, struct file *filp)
 static sel_open_handle_status_fn orig_sel_open_handle_status, *sel_open_handle_status_slot;
 static int my_sel_open_handle_status(struct inode *inode, struct file *filp)
 {
-    if (likely(current_uid().val >= 10000 && ksu_selinux_hide_enabled)) {
+    if (likely(ksu_is_hide_target_uid(current_uid()) && ksu_selinux_hide_enabled)) {
         void *data = fake_status;
         if (data) {
             filp->private_data = data;
@@ -789,7 +798,7 @@ static int string_to_context_struct(struct policydb *pol, struct policydb *orig_
     /* Extract role. */
     scontextp = p;
     while (*p && *p != ':')
-        p++;
+		        p++;
 
     if (*p == 0)
         goto out;
